@@ -1,0 +1,39 @@
+# Root .gitignore for DocSimilarity
+
+# Dependencies
+node_modules/
+frontend - react.JS/node_modules/
+Backend - fastapi/venv/
+
+# Environment Variables / Credentials
+.env
+Backend - fastapi/.env
+frontend - react.JS/.env*
+!.env.example
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Backend-specific
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+Backend - fastapi/app/__pycache__/
+Backend - fastapi/uploads/
+
+# IDE-specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Frontend-specific
+frontend - react.JS/build/
+frontend - react.JS/dist/
+frontend - react.JS/.pnp
+frontend - react.JS/.pnp.js
+frontend - react.JS/npm-debug.log*
+frontend - react.JS/yarn-debug.log*
+frontend - react.JS/yarn-error.log*
