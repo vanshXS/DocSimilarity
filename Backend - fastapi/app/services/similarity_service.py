@@ -1,10 +1,10 @@
-from typing import List
+from typing import List, Optional
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def _normalize_text(text: str | None) -> str:
+def _normalize_text(text: Optional[str]) -> str:
     """
     Safely normalize text input.
     Returns an empty string for None and strips surrounding whitespace.
@@ -63,7 +63,7 @@ def compute_similarity_matrix(texts: List[str]) -> List[List[float]]:
         return [[0.0 for _ in texts] for _ in texts]
 
 
-def compute_pairwise_similarity(text_a: str | None, text_b: str | None) -> float:
+def compute_pairwise_similarity(text_a: Optional[str], text_b: Optional[str]) -> float:
     """
     Compute similarity between two preprocessed texts.
     - Safely handles None / empty / very short texts.
@@ -114,14 +114,14 @@ def classify_similarity(score: float) -> str:
 
 
 def compute_sections_similarities(
-    sections_a: list[str],
-    sections_b: list[str]
-) -> list[float]:
+    sections_a: List[str],
+    sections_b: List[str]
+) -> List[float]:
     """
     Compute similarity score for each aligned section pair.
     Uses the safer compute_pairwise_similarity which handles short/empty texts.
     """
-    similarities: list[float] = []
+    similarities: List[float] = []
 
     limit = min(len(sections_a), len(sections_b))
 

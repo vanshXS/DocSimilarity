@@ -1,4 +1,6 @@
 import os
+from typing import Tuple
+
 from PyPDF2 import PdfReader
 from docx import Document
 from PIL import Image
@@ -28,7 +30,12 @@ def extract_text_from_image(file_path: str) -> str:
     return pytesseract.image_to_string(image).strip()
 
 
-def extract_text(file_path: str, file_type: str) -> tuple[str, str]:
+def extract_text_from_txt(file_path: str) -> str:
+    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read().strip()
+
+
+def extract_text(file_path: str, file_type: str) -> Tuple[str, str]:
     """
     Returns: (extracted_text, extraction_method)
     """
@@ -38,7 +45,10 @@ def extract_text(file_path: str, file_type: str) -> tuple[str, str]:
     if file_type == "docx":
         return extract_text_from_docx(file_path), "docx-parser"
 
+    if file_type == "txt":
+        return extract_text_from_txt(file_path), "txt-reader"
+
     if file_type in {"jpg", "jpeg", "png"}:
         return extract_text_from_image(file_path), "ocr-tesseract"
 
-    raise ValueError("Unsupported file type")
+    raise ValueError(f"Unsupported file type: {file_type}")

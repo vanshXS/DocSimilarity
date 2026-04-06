@@ -1,4 +1,7 @@
-def split_into_sections(text:str, chunk_size:int=200) -> list[str]:
+from typing import List
+
+
+def split_into_sections(text: str, chunk_size: int = 200) -> List[str]:
     """
    Splirt text into word-based sections.
    Each section contains chunk_size words

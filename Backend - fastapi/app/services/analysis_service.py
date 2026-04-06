@@ -1,5 +1,6 @@
 from datetime import datetime
 from uuid import uuid4
+from typing import Optional, List, Set, Tuple
 
 from app.db.mongodb import (
     analysis_sessions_collection,
@@ -13,7 +14,8 @@ from app.models.analysis_model import AnalysisSession
 
 # ---------------- SESSION LOGIC ----------------
 
-def create_session(subject: str, title: str | None):
+# FIX BUG-6: Replaced str | None (Python 3.10+) with Optional[str] for 3.9 compatibility
+def create_session(subject: str, title: Optional[str]):
     session = AnalysisSession(subject=subject, title=title)
     analysis_sessions_collection.insert_one(session.to_dict())
     return session
@@ -49,7 +51,8 @@ def update_session_status(session_id: str, status: str):
 
 # ---------------- FILE METADATA LOGIC ----------------
 
-def save_file_metadata(file_docs: list[dict]):
+# FIX BUG-6: Replaced list[dict] with List[dict] for Python 3.9 compatibility
+def save_file_metadata(file_docs: List[dict]):
     if file_docs:
         analysis_files_collection.insert_many(file_docs)
 
@@ -97,11 +100,11 @@ def update_preprocessed_text(
 
 # ---------------- SIMILARITY LOGIC ----------------
 
-def get_existing_similarity_pairs(session_id: str) -> set[tuple[str, str]]:
+# FIX BUG-6: Replaced set[tuple[str, str]] with Set[Tuple[str, str]]
+def get_existing_similarity_pairs(session_id: str) -> Set[Tuple[str, str]]:
     """
-    FIX BUG-01: The original code only called pairs.add() inside the
-    `if a > b` branch, so pairs where a < b were never recorded.
-    Now we normalise order first, then always add.
+    Returns already-computed file pairs so we don't re-run them.
+    Pairs are always stored in (smaller_id, larger_id) order.
     """
     results = analysis_results_collection.find(
         {"session_id": session_id},
@@ -113,7 +116,7 @@ def get_existing_similarity_pairs(session_id: str) -> set[tuple[str, str]]:
         a_id = r["file_a"]["file_id"]
         b_id = r["file_b"]["file_id"]
 
-        # Always store in (smaller, larger) order so the lookup is consistent
+        # Always store in (smaller, larger) order
         if a_id > b_id:
             a_id, b_id = b_id, a_id
 
@@ -163,7 +166,6 @@ def save_section_similarity(
     score: float,
     level: str
 ):
-    # FIX BUG-08: added result_id so records are uniquely referenceable
     analysis_section_results_collection.insert_one({
         "result_id": str(uuid4()),
         "session_id": session_id,
@@ -177,9 +179,6 @@ def save_section_similarity(
 
 
 def get_section_results_by_session(session_id: str):
-    """
-    Fetch all section-wise similarity results for a session.
-    """
     return list(
         analysis_section_results_collection.find(
             {"session_id": session_id},
@@ -196,7 +195,6 @@ def save_highlight(
     sentence_b: str,
     similarity: float
 ):
-    # FIX BUG-09: added highlight_id for unique identification and deduplication
     analysis_highlights_collection.update_one(
         {
             "session_id": session_id,
@@ -222,9 +220,6 @@ def save_highlight(
 
 
 def get_highlights_by_session(session_id: str):
-    """
-    Fetch all sentence-level highlights for a session.
-    """
     return list(
         analysis_highlights_collection.find(
             {"session_id": session_id},
@@ -239,8 +234,7 @@ def get_highlights_for_pair(
     file_b_id: str
 ):
     """
-    Fetch sentence-level highlights for a specific file pair in a session.
-    Results are returned for both (a,b) and (b,a) ordering.
+    Fetch highlights for a specific file pair - checks both orderings (a,b) and (b,a).
     """
     return list(
         analysis_highlights_collection.find(
@@ -259,13 +253,8 @@ def get_highlights_for_pair(
 # ---------------- DASHBOARD ----------------
 
 def get_dashboard_stats():
-    """
-    Aggregates statistics for the dashboard.
-    """
     total_sessions = analysis_sessions_collection.count_documents({})
-
     total_documents = analysis_files_collection.count_documents({})
-
     high_risk_count = analysis_results_collection.count_documents({
         "similarity_percentage": {"$gte": 70}
     })

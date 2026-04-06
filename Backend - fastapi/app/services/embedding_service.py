@@ -1,3 +1,5 @@
+from typing import List
+
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
@@ -6,7 +8,7 @@ import numpy as np
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
 
-def get_embeddings(texts: list[str]) -> np.ndarray:
+def get_embeddings(texts: List[str]) -> np.ndarray:
     """
     Convert list of texts into embeddings.
     """
@@ -17,8 +19,8 @@ def get_embeddings(texts: list[str]) -> np.ndarray:
 
 
 def compute_semantic_similarity_matrix(
-    sentences_a: list[str],
-    sentences_b: list[str]
+    sentences_a: List[str],
+    sentences_b: List[str]
 ) -> np.ndarray:
     """
     Returns similarity matrix (0-100).

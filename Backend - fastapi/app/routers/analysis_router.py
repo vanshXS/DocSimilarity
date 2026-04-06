@@ -53,29 +53,29 @@ from app.services.embedding_service import (
 )
 
 
-# Initialize router
 router = APIRouter()
 
 
 # ============================================================================
-# BACKGROUND TASK - AUTOMATION LOGIC
+# BACKGROUND TASK - FULL PIPELINE
 # ============================================================================
 
 def process_session_background(session_id: str):
     """
     Orchestrates the entire analysis pipeline in the background.
 
-    Pipeline stages:
+    Stages:
     1. Status → PROCESSING
     2. Text Extraction
     3. NLP Preprocessing
-    4. Document Similarity & Highlighting
-    5. Status → COMPLETED / FAILED
+    4. Document Similarity (TF-IDF 50% + Semantic 50%)
+    5. Sentence-level Highlight Detection (semantic similarity matrix)
+    6. Status → COMPLETED / FAILED
     """
     print(f"--- [Background] Starting pipeline for {session_id} ---")
 
     try:
-        # Stage 1: Set Status to PROCESSING
+        # Stage 1
         update_session_status(session_id, "PROCESSING")
 
         # Stage 2: Text Extraction
@@ -87,10 +87,7 @@ def process_session_background(session_id: str):
                 continue
 
             file_path = os.path.join(session_dir, file["filename"])
-
             if os.path.exists(file_path):
-                # FIX BUG-07: wrap both extract AND update in one try/except
-                # so a failure on one file is isolated and logged clearly
                 try:
                     text, method = extract_text(file_path, file["file_type"])
                     update_extracted_text(file["file_id"], text, method)
@@ -98,7 +95,6 @@ def process_session_background(session_id: str):
                     print(f"[Background] Extraction failed for {file['filename']}: {e}")
 
         # Stage 3: NLP Preprocessing
-        # Re-fetch files to ensure we have the extracted text
         files = get_files_by_session(session_id)
 
         for file in files:
@@ -113,8 +109,7 @@ def process_session_background(session_id: str):
                 except Exception as e:
                     print(f"[Background] NLP failed for {file['filename']}: {e}")
 
-        # Stage 4: Document Similarity & Highlighting
-        # Re-fetch only processed files
+        # Stage 4 & 5: Similarity + Highlighting
         processed_files = [
             f for f in get_files_by_session(session_id)
             if f.get("preprocessed_text")
@@ -127,32 +122,29 @@ def process_session_background(session_id: str):
                     a = processed_files[i]
                     b = processed_files[j]
 
-                    # Normalise order so (a, b) always has the smaller id first
+                    # Normalize order (smaller file_id first)
                     if a["file_id"] > b["file_id"]:
                         a, b = b, a
 
                     if (a["file_id"], b["file_id"]) in existing_pairs:
                         continue
 
-                    # Document Similarity — hybrid: TF-IDF (50%) + semantic (50%)
+                    # Hybrid similarity: TF-IDF 50% + Semantic 50%
                     tfidf_score = compute_pairwise_similarity(
                         a["preprocessed_text"],
                         b["preprocessed_text"]
                     )
-
                     semantic_score = compute_document_semantic_similarity(
                         a.get("extracted_text", ""),
                         b.get("extracted_text", "")
                     )
-
                     score = 0.5 * tfidf_score + 0.5 * semantic_score
                     level = classify_similarity(score)
                     save_similarity_result(session_id, a, b, score, level)
-
                     existing_pairs.add((a["file_id"], b["file_id"]))
 
-                    # Auto-Highlighting (if similarity >= 60%)
-                    if score >= 60:
+                    # FIX BUG-7: Threshold aligned with classify_similarity MEDIUM (>=55)
+                    if score >= 55:
                         try:
                             sa_list = split_into_sentences(a.get("extracted_text", ""))
                             sb_list = split_into_sentences(b.get("extracted_text", ""))
@@ -163,12 +155,9 @@ def process_session_background(session_id: str):
                                     sb_list
                                 )
 
-                                # FIX BUG-02: use si/sj instead of i/j to avoid
-                                # shadowing the outer pair-loop variables
                                 for si in range(len(sa_list)):
                                     for sj in range(len(sb_list)):
                                         s_score = sim_matrix[si][sj]
-
                                         if s_score >= 70:
                                             save_highlight(
                                                 session_id,
@@ -181,7 +170,7 @@ def process_session_background(session_id: str):
                         except Exception as e:
                             print(f"[Background] Embedding highlight error: {e}")
 
-        # Stage 5: Set Status to COMPLETED
+        # Stage 6: Done
         update_session_status(session_id, "COMPLETED")
         print(f"--- [Background] Pipeline COMPLETED for {session_id} ---")
 
@@ -192,19 +181,14 @@ def process_session_background(session_id: str):
 
 # ============================================================================
 # DASHBOARD API
-# FIX BUG-03: /dashboard/stats MUST be registered before any /{session_id}/...
-# routes. FastAPI matches top-down; if the parameterised routes come first,
-# "dashboard" gets captured as session_id and the endpoint returns 404.
+# NOTE: Must be registered BEFORE /{session_id}/... routes to avoid
+# FastAPI capturing "dashboard" as a session_id path param.
 # ============================================================================
 
 @router.get("/dashboard/stats")
 def get_analytics_stats():
-    """
-    Returns aggregated stats for the dashboard cards.
-    """
     try:
-        stats = get_dashboard_stats()
-        return stats
+        return get_dashboard_stats()
     except Exception as e:
         print(f"Stats Error: {e}")
         return {
@@ -216,14 +200,11 @@ def get_analytics_stats():
 
 
 # ============================================================================
-# SESSION MANAGEMENT APIs
+# SESSION MANAGEMENT
 # ============================================================================
 
 @router.post("/session", response_model=CreateSessionResponse)
 def create_analysis_session(request: CreateSessionRequest):
-    """
-    Create a new analysis session.
-    """
     if not request.subject.strip():
         raise HTTPException(status_code=400, detail="Subject is required")
 
@@ -243,16 +224,11 @@ def create_analysis_session(request: CreateSessionRequest):
 
 @router.get("/sessions")
 def list_analysis_sessions():
-    """
-    List all analysis sessions.
-    """
-    return {
-        "sessions": list_sessions()
-    }
+    return {"sessions": list_sessions()}
 
 
 # ============================================================================
-# FILE MANAGEMENT APIs
+# FILE MANAGEMENT
 # ============================================================================
 
 @router.post("/{session_id}/upload")
@@ -260,9 +236,6 @@ def upload_assignments(
     session_id: str,
     files: List[UploadFile] = File(...),
 ):
-    """
-    Upload assignment files to a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -294,9 +267,6 @@ def upload_assignments(
 
 @router.get("/{session_id}/files")
 def list_files_of_session(session_id: str):
-    """
-    List all files in a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -308,7 +278,7 @@ def list_files_of_session(session_id: str):
 
 
 # ============================================================================
-# AUTOMATION APIs
+# AUTOMATION
 # ============================================================================
 
 @router.post("/{session_id}/auto-process")
@@ -316,9 +286,6 @@ def trigger_auto_process(
     session_id: str,
     background_tasks: BackgroundTasks
 ):
-    """
-    Trigger the full analysis pipeline in the background.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -334,9 +301,6 @@ def trigger_auto_process(
 
 @router.get("/{session_id}/status")
 def check_session_status(session_id: str):
-    """
-    Check the current status of the session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -351,14 +315,11 @@ def check_session_status(session_id: str):
 
 
 # ============================================================================
-# RESULTS & HISTORY APIs
+# RESULTS
 # ============================================================================
 
 @router.get("/{session_id}/results")
 def get_session_results(session_id: str):
-    """
-    Get all similarity results for a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -371,9 +332,6 @@ def get_session_results(session_id: str):
 
 @router.get("/{session_id}/section-results")
 def get_session_section_results(session_id: str):
-    """
-    Get section-level similarity results for a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -390,10 +348,6 @@ def get_session_highlights(
     file_a_id: Optional[str] = Query(default=None),
     file_b_id: Optional[str] = Query(default=None),
 ):
-    """
-    Get highlighted similar text segments for a session.
-    Optionally filter by file_a_id and file_b_id query params.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -410,14 +364,11 @@ def get_session_highlights(
 
 
 # ============================================================================
-# MANUAL PROCESSING APIs (For Debugging / Step-by-Step Execution)
+# MANUAL / DEBUG ENDPOINTS
 # ============================================================================
 
 @router.post("/{session_id}/extract-text")
 def extract_text_for_session(session_id: str):
-    """
-    Manually trigger text extraction for all files in a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -437,7 +388,6 @@ def extract_text_for_session(session_id: str):
         if not os.path.exists(file_path):
             continue
 
-        # FIX BUG-07: both extract and update wrapped together
         try:
             text, method = extract_text(file_path, file["file_type"])
             update_extracted_text(file["file_id"], text, method)
@@ -461,9 +411,6 @@ def extract_text_for_session(session_id: str):
 
 @router.post("/{session_id}/nlp-process")
 def run_nlp_for_session(session_id: str):
-    """
-    Manually trigger NLP preprocessing for all files in a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -498,9 +445,6 @@ def run_nlp_for_session(session_id: str):
 
 @router.post("/{session_id}/similarity")
 def run_similarity(session_id: str):
-    """
-    Manually trigger similarity analysis for all file pairs in a session.
-    """
     session = get_session_by_id(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -523,14 +467,12 @@ def run_similarity(session_id: str):
         for j in range(i + 1, len(files)):
             a, b = files[i], files[j]
 
-            # Normalise order
             if a["file_id"] > b["file_id"]:
                 a, b = b, a
 
             if (a["file_id"], b["file_id"]) in existing_pairs:
                 continue
 
-            # FIX BUG-05: use the same hybrid formula as auto-process
             tfidf_score = compute_pairwise_similarity(
                 a["preprocessed_text"],
                 b["preprocessed_text"]
@@ -542,7 +484,6 @@ def run_similarity(session_id: str):
             score = 0.5 * tfidf_score + 0.5 * semantic_score
             level = classify_similarity(score)
             save_similarity_result(session_id, a, b, score, level)
-
             existing_pairs.add((a["file_id"], b["file_id"]))
 
             new_comparisons.append({
@@ -552,8 +493,8 @@ def run_similarity(session_id: str):
                 "level": level
             })
 
-            # Auto-Highlighting using Sentence Embeddings
-            if score >= 60:
+            # FIX BUG-7: Aligned threshold with classify_similarity MEDIUM (>=55)
+            if score >= 55:
                 try:
                     sa_list = split_into_sentences(a.get("extracted_text", ""))
                     sb_list = split_into_sentences(b.get("extracted_text", ""))
@@ -564,11 +505,9 @@ def run_similarity(session_id: str):
                             sb_list
                         )
 
-                        # FIX BUG-02: si/sj instead of i/j
                         for si in range(len(sa_list)):
                             for sj in range(len(sb_list)):
                                 s_score = sim_matrix[si][sj]
-
                                 if s_score >= 70:
                                     save_highlight(
                                         session_id,

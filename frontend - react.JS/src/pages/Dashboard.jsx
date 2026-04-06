@@ -1,17 +1,17 @@
+import {
+  AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  Clock,
+  Files,
+  FileText,
+  Loader2,
+  Plus,
+  TrendingUp
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getDashboardStats, getSessions } from "../api/analysisApi";
-import { 
-  BarChart3, 
-  Files, 
-  AlertTriangle, 
-  TrendingUp, 
-  ArrowRight, 
-  Loader2, 
-  Plus,
-  Clock,
-  FileText
-} from "lucide-react";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -124,7 +124,7 @@ export default function Dashboard() {
               description="Browse past analyses and results"
               icon={<Clock className="w-6 h-6 text-white" />}
               bgColor="bg-gray-700"
-              onClick={() => navigate("/history")}
+              onClick={() => navigate("/results")}
             />
           </div>
         </div>
@@ -210,7 +210,7 @@ function QuickActionCard({ title, description, icon, bgColor, onClick }) {
 function RecentSessionCard({ session, onClick }) {
   const date = new Date(session.created_at).toLocaleDateString();
   const status = session.status || "COMPLETED";
-  
+
   const statusColors = {
     COMPLETED: "bg-green-100 text-green-800",
     PROCESSING: "bg-blue-100 text-blue-800",
@@ -227,9 +227,8 @@ function RecentSessionCard({ session, onClick }) {
           {session.subject}
         </h3>
         <span
-          className={`text-xs px-2 py-1 rounded-full font-medium ${
-            statusColors[status] || "bg-gray-100 text-gray-800"
-          }`}
+          className={`text-xs px-2 py-1 rounded-full font-medium ${statusColors[status] || "bg-gray-100 text-gray-800"
+            }`}
         >
           {status}
         </span>

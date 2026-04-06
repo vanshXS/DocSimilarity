@@ -8,8 +8,8 @@ from fastapi import UploadFile
 # Root folder where all uploads are stored
 UPLOAD_ROOT = "uploads/sessions"
 
-# Allowed assignment file types
-ALLOWED_EXTENSIONS = {"pdf", "docx", "jpg", "jpeg", "png"}
+# FIX BUG-3: Added "txt" to match what the Upload UI advertises
+ALLOWED_EXTENSIONS = {"pdf", "docx", "jpg", "jpeg", "png", "txt"}
 
 
 def _get_file_extension(filename: str) -> str:
@@ -30,7 +30,7 @@ def save_files_to_disk(session_id: str, files: List[UploadFile]) -> None:
     os.makedirs(session_dir, exist_ok=True)
 
     for file in files:
-        # FIX BUG-04: sanitise filename to prevent path traversal
+        # Sanitise filename to prevent path traversal
         safe_filename = os.path.basename(file.filename)
         extension = _get_file_extension(safe_filename)
 
@@ -48,7 +48,7 @@ def save_files_to_disk(session_id: str, files: List[UploadFile]) -> None:
         with open(file_path, "wb") as buffer:
             buffer.write(content)
 
-      
+        # Reset seek so file can be read again if needed
         file.file.seek(0)
 
 
@@ -71,7 +71,7 @@ def build_file_documents(session_id: str, files: List[UploadFile]) -> List[dict]
             "file_type": extension,
             "uploaded_at": datetime.utcnow(),
 
-            # Filled later in Phase 2 / 3
+            # Filled later during processing
             "extracted_text": None,
             "extraction_method": None
         })

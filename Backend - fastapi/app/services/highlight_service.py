@@ -3,10 +3,12 @@ from nltk.tokenize import sent_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-nltk.download("punkt")
+
+nltk.download("punkt", quiet=True)
+nltk.download("punkt_tab", quiet=True)
 
 
-def split_into_sentences(text: str) -> list[str]:
+def split_into_sentences(text: str) -> list:
     """
     Split text into meaningful sentences.
     Very short fragments are discarded to avoid noisy matches.
