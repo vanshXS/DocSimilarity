@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Query, Backgroun
 from typing import List, Optional
 import os
 import traceback
+import shutil
 
 # Schema imports
 from app.schemas.analysis_schema import (
@@ -143,7 +144,7 @@ def process_session_background(session_id: str):
                     save_similarity_result(session_id, a, b, score, level)
                     existing_pairs.add((a["file_id"], b["file_id"]))
 
-                    # FIX BUG-7: Threshold aligned with classify_similarity MEDIUM (>=55)
+                    
                     if score >= 55:
                         try:
                             sa_list = split_into_sentences(a.get("extracted_text", ""))
@@ -170,7 +171,14 @@ def process_session_background(session_id: str):
                         except Exception as e:
                             print(f"[Background] Embedding highlight error: {e}")
 
-        # Stage 6: Done
+        # Stage 6: Cleanup & Done
+        try:
+            if os.path.exists(session_dir):
+                shutil.rmtree(session_dir)
+                print(f"--- [Background] Cleaned up session files for {session_id} ---")
+        except Exception as cleanup_error:
+            print(f"[Background] Cleanup warning for {session_id}: {cleanup_error}")
+
         update_session_status(session_id, "COMPLETED")
         print(f"--- [Background] Pipeline COMPLETED for {session_id} ---")
 

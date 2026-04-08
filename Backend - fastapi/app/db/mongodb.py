@@ -1,6 +1,7 @@
 import os
 from pymongo import MongoClient
 from dotenv import load_dotenv
+import certifi
 
 load_dotenv()
 
@@ -9,7 +10,7 @@ MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
 DATABASE_NAME = os.getenv("DATABASE_NAME", "plagiarism_db")
 
 # Create MongoDB client
-client = MongoClient(MONGODB_URL)
+client = MongoClient(MONGODB_URL,tls=True, tlsCAFile=certifi.where())
 db = client[DATABASE_NAME]
 
 # Collections
