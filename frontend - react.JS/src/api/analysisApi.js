@@ -1,4 +1,19 @@
-const BASE_URL = "http://localhost:8000/api/analysis";
+export const API_ORIGIN =
+  process.env.REACT_APP_API_ORIGIN || "http://localhost:8000";
+
+const BASE_URL = `${API_ORIGIN}/api/analysis`;
+
+export function resolveApiUrl(path) {
+  if (!path) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  return `${API_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 async function handleResponse(response) {
   const isJson = response.headers.get("content-type")?.includes("application/json");
@@ -9,10 +24,9 @@ async function handleResponse(response) {
     error.status = response.status;
     throw error;
   }
+
   return data;
 }
-
-// ==================== Session Management ====================
 
 export async function createSession({ subject, title = null }) {
   const res = await fetch(`${BASE_URL}/session`, {
@@ -33,12 +47,10 @@ export async function checkSessionStatus(sessionId) {
   return handleResponse(res);
 }
 
-// ==================== File Operations ====================
-
 export async function uploadFiles(sessionId, files) {
   const formData = new FormData();
   files.forEach((file) => formData.append("files", file));
-  
+
   const res = await fetch(`${BASE_URL}/${sessionId}/upload`, {
     method: "POST",
     body: formData,
@@ -46,16 +58,12 @@ export async function uploadFiles(sessionId, files) {
   return handleResponse(res);
 }
 
-// ==================== Analysis Operations ====================
-
 export async function triggerAutoProcess(sessionId) {
   const res = await fetch(`${BASE_URL}/${sessionId}/auto-process`, {
     method: "POST",
   });
   return handleResponse(res);
 }
-
-// ==================== Results ====================
 
 export async function getResults(sessionId) {
   const res = await fetch(`${BASE_URL}/${sessionId}/results`);
@@ -67,16 +75,23 @@ export async function getSectionResults(sessionId) {
   return handleResponse(res);
 }
 
-export async function getHighlights(sessionId, fileAId, fileBId) {
-  const res = await fetch(
-    `${BASE_URL}/${sessionId}/highlights?file_a_id=${fileAId}&file_b_id=${fileBId}`
-  );
+export async function getDashboardStats() {
+  const res = await fetch(`${BASE_URL}/dashboard/stats`);
   return handleResponse(res);
 }
 
-// ==================== Dashboard ====================
+export async function deleteSession(sessionId) {
+  const res = await fetch(`${BASE_URL}/${sessionId}`, {
+    method: "DELETE",
+  });
+  return handleResponse(res);
+}
 
-export async function getDashboardStats() {
-  const res = await fetch(`${BASE_URL}/dashboard/stats`);
+export async function deleteMultipleSessions(sessionIds) {
+  const res = await fetch(`${BASE_URL}/bulk-delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_ids: sessionIds }),
+  });
   return handleResponse(res);
 }

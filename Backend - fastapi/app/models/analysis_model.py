@@ -13,6 +13,8 @@ class AnalysisSession:
         title: Optional[str] = None,
         session_id: Optional[str] = None,
         status: str = "CREATED",
+        current_step: Optional[str] = None,
+        progress_percent: int = 0,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None
     ):
@@ -20,6 +22,8 @@ class AnalysisSession:
         self.subject = subject
         self.title = title
         self.status = status
+        self.current_step = current_step
+        self.progress_percent = progress_percent
         self.created_at = created_at or datetime.utcnow()
         self.updated_at = updated_at or datetime.utcnow()
 
@@ -29,6 +33,8 @@ class AnalysisSession:
             "subject": self.subject,
             "title": self.title,
             "status": self.status,
+            "current_step": self.current_step,
+            "progress_percent": self.progress_percent,
             "created_at": self.created_at,
             "updated_at": self.updated_at
         }

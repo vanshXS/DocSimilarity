@@ -1,12 +1,12 @@
-import { Outlet, NavLink } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  Upload, 
+import {
   FileText,
+  LayoutDashboard,
   Menu,
-  X 
+  Upload,
+  X
 } from "lucide-react";
 import { useState } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -72,10 +72,13 @@ export default function Layout() {
             })}
           </nav>
 
-          {/* Footer (Optional) */}
+          {/* Footer */}
           <div className="pt-6 border-t border-slate-800">
-            <p className="text-xs text-slate-500 text-center">
-              © 2026 Document Similarity System
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 text-center">
+              DocSimilarity
+            </p>
+            <p className="text-[10px] text-slate-600 text-center mt-1">
+              Academic Plagiarism Detection
             </p>
           </div>
         </div>

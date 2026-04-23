@@ -1,273 +1,265 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getResults, checkSessionStatus } from "../api/analysisApi";
-import {
-  FileText,
-  ArrowRight,
-  Loader2,
-  AlertCircle,
-  ArrowLeft,
-  Calendar,
-  BarChart,
-} from "lucide-react";
+import { ArrowLeft, Calendar, FileText, Loader2, AlertCircle } from "lucide-react";
+import { checkSessionStatus, getResults } from "../api/analysisApi";
+import ProcessingAudit from "../components/ProcessingAudit";
+
+function buildPairKey(docA, docB) {
+  return `${docA}::${docB}`;
+}
 
 export default function Results() {
   const navigate = useNavigate();
   const { sessionId } = useParams();
 
-  const [results, setResults] = useState([]);
+  const [pairs, setPairs] = useState([]);
   const [sessionInfo, setSessionInfo] = useState({
     subject: "",
     title: "",
     date: "",
     status: "",
+    current_step: "",
+    progress_percent: 0,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (sessionId) {
-      loadData(sessionId);
-    } else {
-      setError("Invalid Session ID.");
-      setLoading(false);
+  // Use a ref for the polling interval so it survives re-renders
+  // without being listed as a dependency (avoids infinite useEffect loops)
+  const pollingRef = useRef(null);
+
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
-  }, [sessionId]);
+  };
 
   const loadData = async (id) => {
     try {
-      const info = await checkSessionStatus(id);
+      const [info, data] = await Promise.all([
+        checkSessionStatus(id),
+        getResults(id),
+      ]);
+
       setSessionInfo({
-        subject: info.subject || "Unknown Session",
-        title: info.title,
+        subject: info.subject || "Document Similarity",
+        title: info.title || "",
         date: new Date(info.created_at).toLocaleDateString(),
         status: info.status,
+        current_step: info.current_step || "",
+        progress_percent: info.progress_percent || 0,
       });
 
-      const data = await getResults(id);
-      const sortedResults = (data.results || []).sort(
-        (a, b) => b.similarity_percentage - a.similarity_percentage
-      );
-      setResults(sortedResults);
+      const sortedPairs = [...(data.pairs || [])].sort((a, b) => b.score - a.score);
+      setPairs(sortedPairs);
+
+      // Stop polling once analysis is done
+      if (info.status === "COMPLETED" || info.status === "FAILED") {
+        stopPolling();
+      }
+
+      return info.status;
     } catch (err) {
       console.error("Failed to load results:", err);
-      setError("Failed to load analysis results. Please try again.");
+      setError("Unable to load comparison results.");
+      stopPolling();
     } finally {
       setLoading(false);
     }
   };
 
-  const handleViewDetails = (item) => {
-    navigate(`/comparison/${item.result_id}`, {
-      state: {
-        resultId: item.result_id,
-        fileA: item.file_a,
-        fileB: item.file_b,
-        overallScore: item.similarity_percentage,
-        sessionId: sessionId,
-      },
+  useEffect(() => {
+    if (!sessionId) {
+      setError("Invalid Session ID.");
+      setLoading(false);
+      return;
+    }
+
+    // Initial load
+    loadData(sessionId).then((status) => {
+      // If still processing, start polling
+      if (status === "PROCESSING") {
+        pollingRef.current = setInterval(async () => {
+          const currentStatus = await loadData(sessionId);
+          if (currentStatus === "COMPLETED" || currentStatus === "FAILED") {
+            stopPolling();
+          }
+        }, 3000);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => stopPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
+  const handleViewDetails = (pair) => {
+    const pairKey = buildPairKey(pair.docA, pair.docB);
+    navigate(`/session/${sessionId}/comparison/${encodeURIComponent(pairKey)}`, {
+      state: { pair, sessionId },
     });
   };
 
   const getScoreColor = (score) => {
-    if (score >= 70) return "text-red-700 bg-red-50 border-red-200";
-    if (score >= 40) return "text-orange-700 bg-orange-50 border-orange-200";
-    return "text-green-700 bg-green-50 border-green-200";
+    if (score >= 70) return "text-rose-600";
+    if (score >= 40) return "text-amber-600";
+    return "text-emerald-600";
   };
 
-  const getScoreBadge = (score) => {
-    if (score >= 70) return "HIGH RISK";
-    if (score >= 40) return "MODERATE";
-    return "LOW RISK";
+  const getScoreBg = (score) => {
+    if (score >= 70) return "bg-rose-50 border-rose-200";
+    if (score >= 40) return "bg-amber-50 border-amber-200";
+    return "bg-emerald-50 border-emerald-200";
   };
+
+  // Show audit screen while processing
+  if (sessionInfo.status === "PROCESSING") {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+        <ProcessingAudit
+          status={sessionInfo.status}
+          currentStep={sessionInfo.current_step}
+          progressPercent={sessionInfo.progress_percent}
+        />
+      </div>
+    );
+  }
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <Loader2 className="w-10 h-10 text-indigo-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-500 font-medium">Loading results...</p>
+          <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-indigo-600" />
+          <p className="text-slate-500 font-medium">Loading results...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
-      {/* Back Button */}
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      {/* Back */}
       <button
         onClick={() => navigate("/")}
-        className="flex items-center gap-2 text-gray-500 hover:text-gray-900 mb-6 transition-colors font-medium group"
+        className="mb-8 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors"
       >
-        <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-        Back to Dashboard
+        <ArrowLeft className="h-4 w-4" />
+        Dashboard
       </button>
 
-      {/* Session Header Card */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-6">
+      {/* Session header */}
+      <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex flex-wrap items-center gap-3 mb-2">
-              <h1 className="text-3xl font-bold text-gray-900 leading-tight">
-                {sessionInfo.subject}
-              </h1>
-              <span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-md font-mono border border-gray-200">
-                {sessionId?.slice(0, 8)}
-              </span>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-gray-500 text-sm">
-              {sessionInfo.title && (
-                <span className="font-medium text-gray-700 bg-gray-50 px-2 py-0.5 rounded">
-                  {sessionInfo.title}
-                </span>
-              )}
+            <h1 className="text-2xl font-bold text-slate-900">{sessionInfo.subject}</h1>
+            {sessionInfo.title && (
+              <p className="mt-1 text-sm text-slate-500">{sessionInfo.title}</p>
+            )}
+            <div className="mt-3 flex items-center gap-4 text-sm text-slate-400">
               <span className="flex items-center gap-1.5">
-                <Calendar className="w-4 h-4" />
+                <Calendar className="h-4 w-4" />
                 {sessionInfo.date}
               </span>
+              <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                sessionInfo.status === "COMPLETED"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : sessionInfo.status === "FAILED"
+                  ? "bg-rose-100 text-rose-700"
+                  : "bg-blue-100 text-blue-700"
+              }`}>
+                {sessionInfo.status}
+              </span>
             </div>
           </div>
 
-          <button
-            onClick={() => navigate("/upload")}
-            className="shrink-0 px-5 py-2.5 bg-white border border-gray-300 rounded-lg text-sm font-semibold text-gray-700 hover:bg-gray-50 hover:text-indigo-600 transition-all shadow-sm"
-          >
-            Start New Analysis
-          </button>
+          {pairs.length > 0 && (
+            <div className="text-right shrink-0">
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Pairs Analyzed</p>
+              <p className="text-3xl font-black text-slate-900">{pairs.length}</p>
+            </div>
+          )}
         </div>
-
-        {/* Summary Stats Row */}
-        {results.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mt-8 pt-6 border-t border-gray-100">
-            <div className="text-center md:text-left">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Total Comparisons
-              </p>
-              <p className="text-3xl font-bold text-gray-900 mt-1">
-                {results.length}
-              </p>
-            </div>
-            <div className="text-center md:text-left">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                High Risk Cases
-              </p>
-              <p className="text-3xl font-bold text-red-600 mt-1">
-                {results.filter((r) => r.similarity_percentage >= 70).length}
-              </p>
-            </div>
-            <div className="col-span-2 md:col-span-1 text-center md:text-left border-t md:border-t-0 pt-4 md:pt-0 border-gray-100 md:border-l md:pl-6">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                Avg. Similarity
-              </p>
-              <p className="text-3xl font-bold text-blue-600 mt-1">
-                {results.length > 0
-                  ? (
-                      results.reduce(
-                        (acc, r) => acc + r.similarity_percentage,
-                        0
-                      ) / results.length
-                    ).toFixed(1)
-                  : 0}
-                %
-              </p>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Results List */}
+      {/* Summary stats if we have results */}
+      {pairs.length > 0 && (
+        <div className="mb-6 grid grid-cols-3 gap-4">
+          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-center">
+            <p className="text-2xl font-black text-rose-600">
+              {pairs.filter((p) => p.score >= 70).length}
+            </p>
+            <p className="text-xs font-bold text-rose-500 mt-1">High Risk (≥70%)</p>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-center">
+            <p className="text-2xl font-black text-amber-600">
+              {pairs.filter((p) => p.score >= 40 && p.score < 70).length}
+            </p>
+            <p className="text-xs font-bold text-amber-500 mt-1">Medium Risk</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+            <p className="text-2xl font-black text-emerald-600">
+              {pairs.filter((p) => p.score < 40).length}
+            </p>
+            <p className="text-xs font-bold text-emerald-500 mt-1">Low Risk</p>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-bold text-slate-800">Document Pairs</h2>
+        <p className="text-sm text-slate-400">{pairs.length} total • sorted by similarity</p>
+      </div>
+
       {error ? (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center text-red-700">
-          <AlertCircle className="w-8 h-8 mx-auto mb-2" />
+        <div className="flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-6 text-rose-700">
+          <AlertCircle className="h-5 w-5 shrink-0" />
           <p className="font-medium">{error}</p>
         </div>
-      ) : results.length === 0 ? (
-        <div className="text-center p-16 bg-white rounded-xl border border-gray-200 shadow-sm">
-          <div className="bg-gray-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <FileText className="w-10 h-10 text-gray-300" />
-          </div>
-          <h3 className="text-xl font-bold text-gray-900">
-            No Similarities Found
-          </h3>
-          <p className="text-gray-500 mt-2 max-w-sm mx-auto">
-            Great news! Comparisons were run, but no significant similarities were
-            detected between the uploaded documents.
+      ) : pairs.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center">
+          <FileText className="mx-auto mb-4 h-12 w-12 text-slate-300" />
+          <p className="font-semibold text-slate-600">No document pairs found</p>
+          <p className="mt-1 text-sm text-slate-400">
+            Make sure at least 2 files were uploaded and processed successfully.
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {results.map((item) => (
-            <div
-              key={item.result_id}
-              className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-200 group overflow-hidden"
+        <div className="space-y-3">
+          {pairs.map((pair) => (
+            <button
+              key={buildPairKey(pair.docA, pair.docB)}
+              onClick={() => handleViewDetails(pair)}
+              className="w-full rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-indigo-200 hover:shadow-md active:scale-[0.99]"
             >
-              <div className="p-5">
-                <div className="flex flex-col lg:flex-row lg:items-center gap-6">
-                  
-                  {/* COMPARISON GRID: Doc A - VS - Doc B */}
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4 items-center flex-1 w-full">
-                    
-                    {/* Document A */}
-                    <div className="flex items-center gap-3 overflow-hidden p-2 rounded-lg hover:bg-gray-50 transition-colors">
-                      <div className="shrink-0 p-2.5 bg-indigo-50 rounded-lg group-hover:bg-indigo-100 transition-colors">
-                        <FileText className="w-5 h-5 text-indigo-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-gray-900 truncate text-base" title={item.file_a.filename}>
-                          {item.file_a.filename}
-                        </p>
-                        <p className="text-xs text-gray-500 font-medium">Document A</p>
-                      </div>
-                    </div>
-
-                    {/* VS Badge */}
-                    <div className="flex flex-col items-center justify-center">
-                      <span className="hidden md:flex w-8 h-8 items-center justify-center rounded-full bg-gray-100 text-gray-400 group-hover:bg-indigo-50 group-hover:text-indigo-500 transition-colors">
-                        <ArrowRight className="w-4 h-4" />
-                      </span>
-                      <span className="md:hidden text-xs font-bold text-gray-400 my-1 bg-gray-100 px-2 py-0.5 rounded-full">VS</span>
-                    </div>
-
-                    {/* Document B */}
-                    <div className="flex items-center gap-3 overflow-hidden md:justify-end md:text-right p-2 rounded-lg hover:bg-gray-50 transition-colors">
-                      {/* Mobile: Icon first, Text second. Desktop: Text first, Icon second (via order) */}
-                      <div className="min-w-0 order-2 md:order-1">
-                        <p className="font-semibold text-gray-900 truncate text-base" title={item.file_b.filename}>
-                          {item.file_b.filename}
-                        </p>
-                        <p className="text-xs text-gray-500 font-medium">Document B</p>
-                      </div>
-                      <div className="shrink-0 p-2.5 bg-purple-50 rounded-lg group-hover:bg-purple-100 transition-colors order-1 md:order-2">
-                        <FileText className="w-5 h-5 text-purple-600" />
-                      </div>
-                    </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="shrink-0 rounded-lg bg-slate-100 p-2">
+                    <FileText className="h-4 w-4 text-slate-500" />
                   </div>
-
-                  {/* SCORE & ACTION (Right Side) */}
-                  <div className="flex items-center justify-between lg:justify-end gap-4 pt-4 lg:pt-0 border-t lg:border-t-0 lg:border-l border-gray-100 lg:pl-6 lg:w-auto w-full">
-                    <div className="text-left lg:text-center min-w-[80px]">
-                      <div className={`inline-flex items-center justify-center w-full px-3 py-1 rounded-md border text-sm font-bold ${getScoreColor(item.similarity_percentage)}`}>
-                        {item.similarity_percentage}%
-                      </div>
-                      <p className="text-[10px] font-bold text-gray-400 mt-1 uppercase tracking-wider pl-1 lg:pl-0 text-center">
-                        {getScoreBadge(item.similarity_percentage)}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => handleViewDetails(item)}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-indigo-600 shadow-sm hover:shadow transition-all whitespace-nowrap"
-                    >
-                      <BarChart className="w-4 h-4" />
-                      <span className="hidden sm:inline">View Report</span>
-                      <span className="sm:hidden">Report</span>
-                    </button>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900 truncate">
+                      {pair.docA}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">vs  {pair.docB}</p>
                   </div>
+                </div>
 
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className={`rounded-xl border px-4 py-2 text-center ${getScoreBg(pair.score)}`}>
+                    <p className={`text-xl font-black ${getScoreColor(pair.score)}`}>
+                      {pair.score}%
+                    </p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      similarity
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold text-indigo-500 hidden sm:block">
+                    View →
+                  </span>
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}

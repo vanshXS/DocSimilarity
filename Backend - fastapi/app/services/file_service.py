@@ -5,10 +5,10 @@ from typing import List
 
 from fastapi import UploadFile
 
-# Root folder where all uploads are stored
+
 UPLOAD_ROOT = "uploads/sessions"
 
-# FIX BUG-3: Added "txt" to match what the Upload UI advertises
+
 ALLOWED_EXTENSIONS = {"pdf", "docx", "jpg", "jpeg", "png", "txt"}
 
 

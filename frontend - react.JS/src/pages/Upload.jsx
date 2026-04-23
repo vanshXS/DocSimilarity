@@ -14,6 +14,7 @@ import {
   triggerAutoProcess,
   checkSessionStatus,
 } from "../api/analysisApi";
+import ProcessingAudit from "../components/ProcessingAudit";
 
 export default function Upload() {
   const navigate = useNavigate();
@@ -22,6 +23,8 @@ export default function Upload() {
   const [status, setStatus] = useState("IDLE"); // IDLE, UPLOADING, PROCESSING, COMPLETED
   const [error, setError] = useState("");
   const [progress, setProgress] = useState("");
+  const [progressPercent, setProgressPercent] = useState(0);
+  const [currentStep, setCurrentStep] = useState("");
   const pollingRef = useRef(null);
 
   useEffect(() => {
@@ -77,8 +80,17 @@ export default function Upload() {
         try {
           const statusRes = await checkSessionStatus(session.session_id);
           
+          if (statusRes.progress_percent !== undefined) {
+            setProgressPercent(statusRes.progress_percent);
+          }
+          if (statusRes.current_step) {
+            setCurrentStep(statusRes.current_step);
+            setProgress(statusRes.current_step);
+          }
+
           if (statusRes.status === "COMPLETED") {
             clearInterval(pollingRef.current);
+            setProgressPercent(100);
             setStatus("COMPLETED");
             setProgress("Analysis complete!");
             setTimeout(() => navigate(`/session/${session.session_id}`), 1500);
@@ -90,10 +102,20 @@ export default function Upload() {
         } catch (err) {
           console.error("Polling error:", err);
         }
-      }, 2000);
+      }, 5000); // Throttled to 5 seconds to avoid locking up FastAPI during heavy OCR
     } catch (err) {
       console.error("Analysis error:", err);
-      setError(err.message || "Something went wrong. Please try again.");
+      let message = "Something went wrong. Please try again.";
+      if (err.message === "Failed to fetch" || err.message === "NetworkError when attempting to fetch resource.") {
+        message = "Cannot connect to the server. Make sure the backend is running on port 8000.";
+      } else if (err.status === 400) {
+        message = err.message || "Invalid request. Please check your files and try again.";
+      } else if (err.status >= 500) {
+        message = "Server error during analysis. Check the backend logs for details.";
+      } else if (err.message) {
+        message = err.message;
+      }
+      setError(message);
       setStatus("IDLE");
     }
   };
@@ -101,17 +123,26 @@ export default function Upload() {
   // Loading state
   if (status === "PROCESSING" || status === "UPLOADING") {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[70vh]">
-        <div className="bg-white p-10 rounded-2xl shadow-lg border max-w-md w-full text-center">
-          <Loader2 className="w-16 h-16 text-blue-600 animate-spin mx-auto mb-6" />
-          <h2 className="text-2xl font-bold text-gray-800 mb-2">
-            {status === "UPLOADING" ? "Uploading..." : "Analyzing..."}
-          </h2>
-          <p className="text-gray-600 mb-4">{progress}</p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div className="bg-blue-600 h-2 rounded-full animate-pulse w-3/4"></div>
+      <div className="min-h-[80vh] flex flex-col items-center justify-center">
+        {status === "PROCESSING" ? (
+          <ProcessingAudit 
+            status={status} 
+            progressPercent={progressPercent} 
+            currentStep={currentStep} 
+          />
+        ) : (
+          <div className="bg-white p-10 rounded-2xl shadow-lg border max-w-md w-full text-center group">
+            <div className="relative mx-auto mb-6 h-16 w-16">
+              <div className="absolute inset-0 animate-ping rounded-full bg-blue-100 opacity-75"></div>
+              <Loader2 className="relative w-16 h-16 text-blue-600 animate-spin mx-auto" />
+            </div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Uploading Documents</h2>
+            <p className="text-gray-600 mb-4">{progress}</p>
+            <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+               <div className="bg-blue-600 h-full rounded-full animate-shimmer bg-[length:200%_100%] bg-gradient-to-r from-transparent via-white/30 to-transparent w-full"></div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     );
   }
