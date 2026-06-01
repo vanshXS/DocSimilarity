@@ -10,4 +10,4 @@ pytesseract
 Pillow
 sentence-transformers
 numpy
-PyMuPDF
+PyMuPDFimagehash==4.3.2 

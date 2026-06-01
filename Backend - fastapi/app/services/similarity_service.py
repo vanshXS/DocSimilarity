@@ -322,7 +322,7 @@ def get_matched_lines(page_a: dict, page_b: dict) -> List[dict]:
     for section_a in sections_a:
         for section_b in sections_b:
             score = _section_similarity(section_a["text"], section_b["text"])
-            if score < 0.28:
+            if score < 0.35:
                 continue
 
             anchor = _best_line_anchor(section_a, section_b)
@@ -400,31 +400,24 @@ def select_top_page_matches(
     pages_a: List[dict],
     pages_b: List[dict],
     page_similarity_matrix: np.ndarray,
-    max_matches: int = 10,
+    max_matches: int = 15,
 ) -> List[dict]:
     """
     Select page-pair matches for the comparison view.
 
-    Strategy (designed for assignment comparison):
-    1. ALWAYS include same-page-number pairs (page 1 vs page 1, etc.)
-       because assignments answer the same questions on matching pages.
-    2. Fill remaining slots with the best cross-page matches.
-    3. Adapt max_matches to document size — never drop a diagonal pair.
-
-    This ensures the teacher ALWAYS sees the natural page-by-page comparison
-    even if OCR noise makes those pairs score lower than cross-page pairs.
+    Strategy:
+    1. Include the BEST match for every page in Document A.
+    2. Include the BEST match for every page in Document B.
+    3. Include same-page-number pairs (diagonal) as a baseline.
+    4. Fill remaining slots with highest overall similarity.
+    5. Sort everything by similarity so the most suspicious pairs appear at the top.
     """
     if page_similarity_matrix.size == 0:
         return []
 
-    # Adapt max: at least enough slots for every same-page pair
-    min_pages = min(len(pages_a), len(pages_b))
-    effective_max = max(max_matches, min_pages)
-
-    # ── Score every page pair (cheap — just reading the matrix) ──
     all_pairs = []
-    diagonal_pairs = []
-
+    
+    # ── Score every page pair (cheap — just reading the matrix) ──
     for index_a, page_a in enumerate(pages_a):
         for index_b, page_b in enumerate(pages_b):
             similarity = float(page_similarity_matrix[index_a, index_b])
@@ -439,29 +432,40 @@ def select_top_page_matches(
             }
             all_pairs.append(pair)
 
-            # Track same-page-number pairs (the diagonal of the matrix)
-            if pair["pageA"] == pair["pageB"]:
-                diagonal_pairs.append(pair)
-
-    # ── Build selection: diagonal first, then best cross-page ──
     selected_keys = set()
     selected = []
 
-    # 1. Always include all same-page-number pairs, sorted by page number
-    for pair in sorted(diagonal_pairs, key=lambda p: p["pageA"]):
-        key = (pair["index_a"], pair["index_b"])
-        selected.append(pair)
-        selected_keys.add(key)
+    def add_pair(p):
+        key = (p["index_a"], p["index_b"])
+        if key not in selected_keys:
+            selected.append(p)
+            selected_keys.add(key)
 
-    # 2. Fill remaining slots with best cross-page matches
+    # 1. Best match for each page in A
+    for index_a in range(len(pages_a)):
+        best_b = int(np.argmax(page_similarity_matrix[index_a, :]))
+        pair = next(p for p in all_pairs if p["index_a"] == index_a and p["index_b"] == best_b)
+        add_pair(pair)
+
+    # 2. Best match for each page in B
+    for index_b in range(len(pages_b)):
+        best_a = int(np.argmax(page_similarity_matrix[:, index_b]))
+        pair = next(p for p in all_pairs if p["index_a"] == best_a and p["index_b"] == index_b)
+        add_pair(pair)
+
+    # 3. Same-page pairs (diagonal)
+    for p in all_pairs:
+        if p["pageA"] == p["pageB"]:
+            add_pair(p)
+
+    # 4. Fill remaining up to max_matches with highest overall similarity
+    effective_max = max(max_matches, len(pages_a), len(pages_b))
     all_pairs.sort(key=lambda item: item["similarity"], reverse=True)
-    for pair in all_pairs:
+    for p in all_pairs:
         if len(selected) >= effective_max:
             break
-        key = (pair["index_a"], pair["index_b"])
-        if key not in selected_keys and pair["similarity"] >= 5:
-            selected.append(pair)
-            selected_keys.add(key)
+        if p["similarity"] >= 5: # only add if there's some similarity
+            add_pair(p)
 
     # ── Run section-level matching on selected pairs ──
     results = []
@@ -483,16 +487,15 @@ def select_top_page_matches(
             "matched_lines": matched_lines,
         })
 
-    # Sort: same-page pairs first (by page number), then cross-page by similarity
+    # Sort: highest similarity first!
     results.sort(key=lambda r: (
-        0 if r["pageA"] == r["pageB"] else 1,
-        r["pageA"] if r["pageA"] == r["pageB"] else 9999,
         -r["similarity"],
+        0 if r["pageA"] == r["pageB"] else 1,
+        r["pageA"]
     ))
 
     logger.debug(
-        f"Page matches: {len(diagonal_pairs)} diagonal + "
-        f"{len(results) - len(diagonal_pairs)} cross-page = {len(results)} total"
+        f"Page matches: selected {len(results)} pairs"
     )
     return results
 
